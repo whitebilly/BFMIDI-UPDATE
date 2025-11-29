@@ -249,6 +249,89 @@
       display: block;
     }
 
+    /* Stepper */
+    .stepper-container {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      margin-top: 30px;
+      width: 100%;
+      padding: 0 10px;
+    }
+
+    .step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      z-index: 2;
+      flex: 0 0 auto;
+    }
+
+    .circle {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 2px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.3);
+      transition: all 0.4s ease;
+    }
+
+    .label {
+      margin-top: 8px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.3);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      transition: all 0.4s ease;
+    }
+
+    .line {
+      flex: 1;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.1);
+      margin: 15px 5px 0 5px;
+      /* Align with circle center */
+      transition: all 0.4s ease;
+    }
+
+    /* Active/Done States */
+    .step.active .circle {
+      border-color: var(--primary);
+      color: white;
+      box-shadow: 0 0 15px rgba(37, 99, 235, 0.4);
+      background: rgba(37, 99, 235, 0.1);
+    }
+
+    .step.active .label {
+      color: white;
+    }
+
+    .step.done .circle {
+      background: #10b981;
+      border-color: #10b981;
+      color: white;
+    }
+
+    .step.done .label {
+      color: #10b981;
+    }
+
+    .line.active {
+      background: var(--primary);
+    }
+
+    .line.done {
+      background: #10b981;
+    }
+
     /* Hidden technical elements */
     #log,
     #fileList,
@@ -299,6 +382,23 @@
 
       <button class="btn" id="actionBtn">Conectar Dispositivo</button>
       <div class="spinner" id="spinner"></div>
+
+      <div class="stepper-container">
+        <div class="step active" id="step1">
+          <div class="circle">1</div>
+          <div class="label">Conectar</div>
+        </div>
+        <div class="line" id="line1"></div>
+        <div class="step" id="step2">
+          <div class="circle">2</div>
+          <div class="label">Autorizar</div>
+        </div>
+        <div class="line" id="line2"></div>
+        <div class="step" id="step3">
+          <div class="circle">3</div>
+          <div class="label">Atualizar</div>
+        </div>
+      </div>
 
       <div class="progress-container" id="progressContainer">
         <div class="progress-bar" id="progressBar"></div>
@@ -354,6 +454,39 @@
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+    // Stepper Elements
+    const step1 = document.getElementById("step1");
+    const step2 = document.getElementById("step2");
+    const step3 = document.getElementById("step3");
+    const line1 = document.getElementById("line1");
+    const line2 = document.getElementById("line2");
+
+    function updateStepper(step) {
+      // Reset all
+      [step1, step2, step3].forEach(s => s.className = "step");
+      [line1, line2].forEach(l => l.className = "line");
+
+      if (step >= 1) {
+        step1.classList.add("active");
+      }
+      if (step >= 2) {
+        step1.classList.remove("active");
+        step1.classList.add("done");
+        line1.classList.add("done");
+        step2.classList.add("active");
+      }
+      if (step >= 3) {
+        step2.classList.remove("active");
+        step2.classList.add("done");
+        line2.classList.add("done");
+        step3.classList.add("active");
+      }
+      if (step === 4) { // Done state
+        step3.classList.remove("active");
+        step3.classList.add("done");
+      }
+    }
+
     // --- UI Helpers ---
 
     const description = document.getElementById("description");
@@ -378,11 +511,13 @@
 
       switch (state) {
         case 'idle':
+          updateStepper(1);
           actionBtn.textContent = "Conectar Dispositivo";
           description.textContent = "Conecte seu dispositivo USB para iniciar a atualização do firmware oficial.";
           progressContainer.classList.remove("visible");
           break;
         case 'awaiting_port':
+          updateStepper(2);
           actionBtn.textContent = "Autorizar Conexão";
           description.textContent = "Por segurança, o navegador precisa que você confirme a nova porta. Clique abaixo e selecione o dispositivo.";
           actionBtn.style.display = "block";
@@ -390,16 +525,19 @@
           statusRing.classList.add("active");
           break;
         case 'connecting':
+          updateStepper(2);
           actionBtn.style.display = "none"; // Hide button
           spinner.classList.add("visible"); // Show spinner
           statusRing.classList.add("active");
           break;
         case 'connected':
+          updateStepper(3);
           actionBtn.textContent = "Iniciar Atualização";
           description.textContent = "Dispositivo conectado. Pronto para gravar.";
           statusRing.classList.add("active");
           break;
         case 'flashing':
+          updateStepper(3);
           actionBtn.textContent = "Atualizando...";
           description.textContent = "Update em andamento...";
           actionBtn.disabled = true;
@@ -407,6 +545,7 @@
           progressContainer.classList.add("visible");
           break;
         case 'done':
+          updateStepper(4);
           actionBtn.textContent = "Atualizado com Sucesso";
           description.textContent = "Processo finalizado com sucesso.";
           statusRing.classList.add("success");
