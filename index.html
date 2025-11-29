@@ -701,9 +701,12 @@
         transport = wrapSignals(new Transport(device, true));
         esploader = new ESPLoader({
           transport,
-          baudrate: 921600,
+          baudrate: 460800, // Reduzido para melhor compatibilidade (Mac/Win)
           terminal: espLoaderTerminal,
         });
+
+        // Pequeno delay para estabilizar a porta no Mac antes do handshake
+        await sleep(100);
 
         await esploader.main('no_reset');
         setUIState('connected', "Dispositivo pronto. Clique para atualizar.");
