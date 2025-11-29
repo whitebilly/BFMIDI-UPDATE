@@ -382,6 +382,13 @@
           description.textContent = "Conecte seu dispositivo USB para iniciar a atualização do firmware oficial.";
           progressContainer.classList.remove("visible");
           break;
+        case 'awaiting_port':
+          actionBtn.textContent = "Autorizar Conexão";
+          description.textContent = "Por segurança, o navegador precisa que você confirme a nova porta. Clique abaixo e selecione o dispositivo.";
+          actionBtn.style.display = "block";
+          spinner.classList.remove("visible");
+          statusRing.classList.add("active");
+          break;
         case 'connecting':
           actionBtn.style.display = "none"; // Hide button
           spinner.classList.add("visible"); // Show spinner
@@ -424,6 +431,14 @@
       setTimeout(() => toastEl.classList.remove("show"), 5000);
     }
 
+    // Main Button Handler
+    actionBtn.addEventListener('click', () => {
+      if (appState === 'idle' || appState === 'error' || appState === 'awaiting_port') {
+        handleConnect();
+      } else if (appState === 'connected') {
+        handleFlash();
+      }
+    });
     function log(msg) {
       console.log(msg); // Keep console log for debug
       // logEl is hidden but we can keep appending if needed
@@ -473,13 +488,13 @@
     async function pulseBootMode(t) {
       await t.setRTS?.(true);
       await t.setDTR?.(false);
-      await sleep(80);
+      await sleep(150);
       await t.setDTR?.(true);
       await t.setRTS?.(false);
-      await sleep(120);
+      await sleep(150);
     }
 
-    async function waitForReconnect(timeoutMs = 7000) {
+    async function waitForReconnect(timeoutMs = 15000) {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         const ports = await serialLib.getPorts();
@@ -521,11 +536,28 @@
           }
 
           setUIState('connecting', "Reiniciando em modo download...");
+          // Delay critico de 2s conforme documentacao
           await sleep(2000);
-          await waitForReconnect(6000);
+
+          // Tenta reconectar
+          try {
+            await waitForReconnect(15000);
+          } catch (e) {
+            // Se falhar reconexao automatica (permissao), pedimos manual
+            log("Falha no reconnect automatico: " + e.message);
+            device = null;
+            lastPortInfo = null; // Limpa filtro para permitir novo PID (0x0002)
+          }
         }
 
-        if (!device) await acquirePort();
+        // Se device for null aqui, significa que precisamos de intervencao manual
+        if (!device) {
+          setUIState('awaiting_port', "Clique para confirmar a porta do dispositivo...");
+          return; // Sai da funcao e aguarda clique do usuario
+        }
+
+        // Se por algum motivo device for null (ex: falha no wait e no acquire), paramos
+        if (!device) throw new Error("Dispositivo não selecionado.");
 
         transport = wrapSignals(new Transport(device, true));
         esploader = new ESPLoader({
