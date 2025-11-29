@@ -333,7 +333,42 @@
     }
 
     /* Hidden technical elements */
-    #log,
+    #log {
+      display: none;
+      width: 100%;
+      height: 150px;
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 20px;
+      font-family: monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      overflow-y: auto;
+      text-align: left;
+      white-space: pre-wrap;
+    }
+
+    #log.visible {
+      display: block;
+    }
+
+    .debug-toggle {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: underline;
+      margin-top: 10px;
+      opacity: 0.5;
+    }
+
+    .debug-toggle:hover {
+      opacity: 1;
+    }
+
     #fileList,
     #baudSelect {
       display: none;
@@ -405,13 +440,16 @@
       </div>
 
       <div class="status-text" id="statusText">Aguardando conexão...</div>
+
+      <button class="debug-toggle" id="debugToggle">Mostrar Logs de Debug</button>
+      <div id="log"></div>
     </div>
   </div>
 
   <div class="toast" id="toast"></div>
 
   <!-- Hidden technical elements needed for logic -->
-  <div id="log"></div>
+  <!-- <div id="log"></div> Moved inside card -->
   <select id="baudSelect">
     <option value="921600" selected>921600</option>
   </select>
@@ -429,7 +467,13 @@
     const progressContainer = document.getElementById("progressContainer");
     const toastEl = document.getElementById("toast");
     const logEl = document.getElementById("log");
+    const debugToggle = document.getElementById("debugToggle");
     const baudSelect = document.getElementById("baudSelect");
+
+    debugToggle.addEventListener('click', () => {
+      logEl.classList.toggle('visible');
+      debugToggle.textContent = logEl.classList.contains('visible') ? "Ocultar Logs" : "Mostrar Logs de Debug";
+    });
 
     const serialLib = navigator.serial ? navigator.serial : (navigator.usb ? window.serial : null);
 
@@ -560,6 +604,8 @@
           actionBtn.textContent = "Tentar Novamente";
           statusRing.classList.add("error");
           progressContainer.classList.remove("visible");
+          document.getElementById("log").classList.add("visible"); // Auto-show logs on error
+          document.getElementById("debugToggle").textContent = "Ocultar Logs";
           break;
       }
     }
@@ -579,8 +625,11 @@
       }
     });
     function log(msg) {
-      console.log(msg); // Keep console log for debug
-      // logEl is hidden but we can keep appending if needed
+      console.log(msg);
+      const line = document.createElement('div');
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
     }
 
     // --- Core Logic (Adapted) ---
@@ -593,6 +642,9 @@
 
     async function acquirePort() {
       if (!serialLib) throw new Error("Navegador incompatível. Use Chrome ou Edge.");
+
+      log("User Agent: " + navigator.userAgent);
+      log("Solicitando porta serial...");
 
       const filters = lastPortInfo ? [lastPortInfo] : defaultFilters;
       try {
@@ -645,10 +697,12 @@
           device = match;
           const info = device.getInfo();
           lastPortInfo = { usbVendorId: info.usbVendorId, usbProductId: info.usbProductId };
+          log(`Reconectado: VID=${info.usbVendorId.toString(16)} PID=${info.usbProductId.toString(16)}`);
           return match;
         }
         await sleep(250);
       }
+      log("Timeout aguardando reconexão.");
       throw new Error("Dispositivo não reconectou. Tente desconectar e conectar o cabo.");
     }
 
@@ -675,8 +729,10 @@
           }
 
           setUIState('connecting', "Reiniciando em modo download...");
-          // Delay critico de 2s conforme documentacao
-          await sleep(2000);
+          setUIState('connecting', "Reiniciando em modo download...");
+          // Delay critico de 3s para macOS
+          log("Aguardando 3s para re-enumeração USB...");
+          await sleep(3000);
 
           // Tenta reconectar
           try {
@@ -701,7 +757,7 @@
         transport = wrapSignals(new Transport(device, true));
         esploader = new ESPLoader({
           transport,
-          baudrate: 460800, // Reduzido para melhor compatibilidade (Mac/Win)
+          baudrate: 115200, // Forçado 115200 para evitar erro de troca de baud no Mac (USB Nativo ignora baud, então continua rápido)
           terminal: espLoaderTerminal,
         });
 
@@ -712,7 +768,9 @@
         setUIState('connected', "Dispositivo pronto. Clique para atualizar.");
 
       } catch (err) {
-        setUIState('error', "Erro na conexão");
+        log("Erro fatal: " + err.message);
+        log(err.stack);
+        setUIState('error', "Erro na conexão: " + err.message);
         showToast(err.message);
         await disconnect(true);
       }
