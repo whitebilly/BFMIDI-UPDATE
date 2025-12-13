@@ -816,12 +816,24 @@
     }
 
     async function pulseBootMode(t) {
-      await t.setRTS?.(true);
-      await t.setDTR?.(false);
-      await sleep(150);
-      await t.setDTR?.(true);
-      await t.setRTS?.(false);
-      await sleep(150);
+      // Sequência de boot para ESP32-S3 USB nativo
+      // GPIO0 = DTR (boot), EN/RESET = RTS
+      log("Enviando sequência de boot...");
+
+      // Reset inicial
+      await t.setRTS?.(true);   // EN baixo (reset)
+      await t.setDTR?.(true);   // GPIO0 baixo (boot mode)
+      await sleep(100);
+
+      // Solta reset mantendo GPIO0 baixo
+      await t.setRTS?.(false);  // EN alto (sai do reset)
+      await sleep(50);
+
+      // Solta GPIO0
+      await t.setDTR?.(false);  // GPIO0 alto
+      await sleep(50);
+
+      log("Sequência de boot enviada.");
     }
 
     async function waitForReconnect(timeoutMs = 15000) {
@@ -893,17 +905,62 @@
         // Se por algum motivo device for null (ex: falha no wait e no acquire), paramos
         if (!device) throw new Error("Dispositivo não selecionado.");
 
-        transport = wrapSignals(new Transport(device, true));
-        esploader = new ESPLoader({
-          transport,
-          baudrate: 115200, // Forçado 115200 para evitar erro de troca de baud no Mac (USB Nativo ignora baud, então continua rápido)
-          terminal: espLoaderTerminal,
-        });
+        // Delay maior para estabilizar a porta após reconexão
+        log("Aguardando estabilização da porta...");
+        await sleep(500);
 
-        // Pequeno delay para estabilizar a porta no Mac antes do handshake
-        await sleep(100);
+        // Tenta conectar com retry em caso de "invalid response"
+        let connected = false;
+        let lastError = null;
+        const maxRetries = 3;
 
-        await esploader.main('no_reset');
+        for (let attempt = 1; attempt <= maxRetries && !connected; attempt++) {
+          try {
+            log(`Tentativa de conexão ${attempt}/${maxRetries}...`);
+
+            // Fecha transport anterior se existir
+            if (transport) {
+              await closeTransportSafe(transport);
+              transport = null;
+              esploader = null;
+              await sleep(300);
+            }
+
+            transport = wrapSignals(new Transport(device, true));
+            esploader = new ESPLoader({
+              transport,
+              baudrate: 115200,
+              terminal: espLoaderTerminal,
+              romBaudrate: 115200,
+            });
+
+            await esploader.main('no_reset');
+            connected = true;
+            log("Conexão estabelecida com sucesso!");
+
+          } catch (err) {
+            lastError = err;
+            log(`Tentativa ${attempt} falhou: ${err.message}`);
+
+            // Se for "invalid response", tenta novamente após delay
+            if (err.message.includes("invalid response") && attempt < maxRetries) {
+              log("Aguardando antes de nova tentativa...");
+              await closeTransportSafe(transport);
+              transport = null;
+              esploader = null;
+              await sleep(1000 * attempt); // Delay progressivo: 1s, 2s, 3s
+            } else if (attempt >= maxRetries) {
+              throw lastError;
+            } else {
+              throw err;
+            }
+          }
+        }
+
+        if (!connected) {
+          throw lastError || new Error("Falha ao conectar após múltiplas tentativas");
+        }
+
         setUIState('connected', "Dispositivo pronto. Clique para atualizar.");
 
         // Se estiver em modo automático, inicia o flash automaticamente
