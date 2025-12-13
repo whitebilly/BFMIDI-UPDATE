@@ -396,6 +396,98 @@
     .toast.show {
       transform: translateX(-50%) translateY(0);
     }
+
+    .flash-options {
+      margin-top: 14px;
+      padding: 14px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.02);
+      text-align: left;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .toggle-label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .toggle-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.92);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .toggle-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.35;
+    }
+
+    .switch {
+      position: relative;
+      width: 44px;
+      height: 26px;
+      flex: 0 0 auto;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(148, 163, 184, 0.3);
+      transition: 0.2s;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 20px;
+      width: 20px;
+      left: 3px;
+      top: 50%;
+      transform: translateY(-50%);
+      background-color: white;
+      transition: 0.2s;
+      border-radius: 999px;
+    }
+
+    .switch input:checked+.slider {
+      background-color: rgba(37, 99, 235, 0.8);
+      border-color: rgba(59, 130, 246, 0.5);
+      box-shadow: 0 0 16px rgba(37, 99, 235, 0.25);
+    }
+
+    .switch input:checked+.slider:before {
+      transform: translateY(-50%) translateX(18px);
+    }
+
+    .switch input:disabled+.slider {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 
@@ -417,6 +509,19 @@
 
       <button class="btn" id="actionBtn">Conectar Dispositivo</button>
       <div class="spinner" id="spinner"></div>
+
+      <div class="flash-options" id="flashOptions">
+        <div class="toggle-row">
+          <div class="toggle-label">
+            <div class="toggle-title">Erase All Flash</div>
+            <div class="toggle-hint">Opcional: apaga toda a memoria (configuracoes e dados) antes de gravar a nova firmware.</div>
+          </div>
+          <label class="switch" aria-label="Erase All Flash">
+            <input type="checkbox" id="eraseAllToggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
 
       <div class="stepper-container">
         <div class="step active" id="step1">
@@ -469,6 +574,8 @@
     const logEl = document.getElementById("log");
     const debugToggle = document.getElementById("debugToggle");
     const baudSelect = document.getElementById("baudSelect");
+    const flashOptions = document.getElementById("flashOptions");
+    const eraseAllToggle = document.getElementById("eraseAllToggle");
 
     debugToggle.addEventListener('click', () => {
       logEl.classList.toggle('visible');
@@ -544,6 +651,10 @@
       actionBtn.disabled = false;
       actionBtn.style.display = "block"; // Default show
       spinner.classList.remove("visible"); // Default hide
+      if (flashOptions) flashOptions.style.display = "block";
+      if (eraseAllToggle) {
+        eraseAllToggle.disabled = (state === 'flashing' || state === 'connecting' || state === 'awaiting_port');
+      }
 
       // Reset icon if needed (restore Chip icon)
       if (state !== 'done') {
@@ -802,6 +913,15 @@
       setUIState('flashing', "Preparando arquivos...");
 
       try {
+        const shouldEraseAll = !!eraseAllToggle?.checked;
+        const canEraseBeforeWrite = typeof esploader.eraseFlash === "function";
+
+        if (shouldEraseAll && canEraseBeforeWrite) {
+          progressBar.style.width = "0%";
+          setUIState('flashing', "Apagando toda a memoria (Erase All Flash)...");
+          await esploader.eraseFlash();
+        }
+
         const fileArray = [];
         let totalSize = 0;
 
@@ -817,7 +937,7 @@
         // Flash
         await esploader.writeFlash({
           fileArray,
-          eraseAll: false,
+          eraseAll: shouldEraseAll && !canEraseBeforeWrite,
           compress: true,
           flashSize: "4MB",
           reportProgress: (idx, written, total) => {
@@ -856,15 +976,6 @@
         await disconnect(true);
       }
     }
-
-    // Main Button Handler
-    actionBtn.addEventListener('click', () => {
-      if (appState === 'idle' || appState === 'error') {
-        handleConnect();
-      } else if (appState === 'connected') {
-        handleFlash();
-      }
-    });
 
   </script>
 </body>
