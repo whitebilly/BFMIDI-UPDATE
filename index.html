@@ -588,23 +588,6 @@
     const eraseAllToggle = document.getElementById("eraseAllToggle");
     const autoFlashToggle = document.getElementById("autoFlashToggle");
 
-    // Sincroniza o modo automático com o toggle
-    autoFlashToggle.addEventListener('change', () => {
-      autoFlashMode = autoFlashToggle.checked;
-      log("Modo automatico: " + (autoFlashMode ? "ATIVADO" : "DESATIVADO"));
-      // Atualiza a UI se estiver no estado idle
-      if (appState === 'idle') {
-        setUIState('idle', "Aguardando conexão...");
-      }
-    });
-    // Inicializa o modo automático baseado no estado inicial do checkbox
-    autoFlashMode = autoFlashToggle.checked;
-
-    debugToggle.addEventListener('click', () => {
-      logEl.classList.toggle('visible');
-      debugToggle.textContent = logEl.classList.contains('visible') ? "Ocultar Logs" : "Mostrar Logs de Debug";
-    });
-
     const serialLib = navigator.serial ? navigator.serial : (navigator.usb ? window.serial : null);
 
     // Configurações fixas
@@ -625,7 +608,22 @@
     let esploader = null;
     let lastPortInfo = null;
     let appState = 'idle'; // idle, connected, flashing, done
-    let autoFlashMode = false; // Modo de atualização automática
+    let autoFlashMode = autoFlashToggle.checked; // Inicializa baseado no checkbox
+
+    // Sincroniza o modo automático com o toggle
+    autoFlashToggle.addEventListener('change', () => {
+      autoFlashMode = autoFlashToggle.checked;
+      log("Modo automatico: " + (autoFlashMode ? "ATIVADO" : "DESATIVADO"));
+      // Atualiza a UI se estiver no estado idle
+      if (appState === 'idle') {
+        setUIState('idle', "Aguardando conexão...");
+      }
+    });
+
+    debugToggle.addEventListener('click', () => {
+      logEl.classList.toggle('visible');
+      debugToggle.textContent = logEl.classList.contains('visible') ? "Ocultar Logs" : "Mostrar Logs de Debug";
+    });
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
