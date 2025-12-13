@@ -513,8 +513,18 @@
       <div class="flash-options" id="flashOptions">
         <div class="toggle-row">
           <div class="toggle-label">
+            <div class="toggle-title">Atualizacao Automatica</div>
+            <div class="toggle-hint">Conecta e grava automaticamente sem precisar clicar em "Iniciar".</div>
+          </div>
+          <label class="switch" aria-label="Atualizacao Automatica">
+            <input type="checkbox" id="autoFlashToggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row" style="margin-top: 12px;">
+          <div class="toggle-label">
             <div class="toggle-title">Erase All Flash</div>
-            <div class="toggle-hint">Opcional: apaga toda a memoria (configuracoes e dados) antes de gravar a nova firmware.</div>
+            <div class="toggle-hint">Opcional: apaga toda a memoria (configuracoes e dados) antes de gravar.</div>
           </div>
           <label class="switch" aria-label="Erase All Flash">
             <input type="checkbox" id="eraseAllToggle">
@@ -576,6 +586,19 @@
     const baudSelect = document.getElementById("baudSelect");
     const flashOptions = document.getElementById("flashOptions");
     const eraseAllToggle = document.getElementById("eraseAllToggle");
+    const autoFlashToggle = document.getElementById("autoFlashToggle");
+
+    // Sincroniza o modo automático com o toggle
+    autoFlashToggle.addEventListener('change', () => {
+      autoFlashMode = autoFlashToggle.checked;
+      log("Modo automatico: " + (autoFlashMode ? "ATIVADO" : "DESATIVADO"));
+      // Atualiza a UI se estiver no estado idle
+      if (appState === 'idle') {
+        setUIState('idle', "Aguardando conexão...");
+      }
+    });
+    // Inicializa o modo automático baseado no estado inicial do checkbox
+    autoFlashMode = autoFlashToggle.checked;
 
     debugToggle.addEventListener('click', () => {
       logEl.classList.toggle('visible');
@@ -602,6 +625,7 @@
     let esploader = null;
     let lastPortInfo = null;
     let appState = 'idle'; // idle, connected, flashing, done
+    let autoFlashMode = false; // Modo de atualização automática
 
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -652,8 +676,12 @@
       actionBtn.style.display = "block"; // Default show
       spinner.classList.remove("visible"); // Default hide
       if (flashOptions) flashOptions.style.display = "block";
+      const isProcessing = (state === 'flashing' || state === 'connecting' || state === 'awaiting_port');
       if (eraseAllToggle) {
-        eraseAllToggle.disabled = (state === 'flashing' || state === 'connecting' || state === 'awaiting_port');
+        eraseAllToggle.disabled = isProcessing;
+      }
+      if (autoFlashToggle) {
+        autoFlashToggle.disabled = isProcessing;
       }
 
       // Reset icon if needed (restore Chip icon)
@@ -667,8 +695,10 @@
       switch (state) {
         case 'idle':
           updateStepper(1);
-          actionBtn.textContent = "Conectar Dispositivo";
-          description.textContent = "Conecte seu dispositivo USB para iniciar a atualização do firmware oficial.";
+          actionBtn.textContent = autoFlashMode ? "Conectar e Atualizar" : "Conectar Dispositivo";
+          description.textContent = autoFlashMode
+            ? "Clique no botao abaixo para conectar e atualizar automaticamente."
+            : "Conecte seu dispositivo USB para iniciar a atualização do firmware oficial.";
           progressContainer.classList.remove("visible");
           break;
         case 'awaiting_port':
@@ -878,6 +908,13 @@
         await esploader.main('no_reset');
         setUIState('connected', "Dispositivo pronto. Clique para atualizar.");
 
+        // Se estiver em modo automático, inicia o flash automaticamente
+        if (autoFlashMode) {
+          log("Modo automatico ativo - iniciando flash...");
+          await sleep(300);
+          handleFlash();
+        }
+
       } catch (err) {
         log("Erro fatal: " + err.message);
         log(err.stack);
@@ -916,28 +953,57 @@
         const shouldEraseAll = !!eraseAllToggle?.checked;
         const canEraseBeforeWrite = typeof esploader.eraseFlash === "function";
 
-        if (shouldEraseAll && canEraseBeforeWrite) {
+        // Erase All Flash - com tratamento de erro adequado
+        if (shouldEraseAll) {
           progressBar.style.width = "0%";
           setUIState('flashing', "Apagando toda a memoria (Erase All Flash)...");
-          await esploader.eraseFlash();
+          log("Iniciando Erase All Flash...");
+
+          if (canEraseBeforeWrite) {
+            try {
+              await esploader.eraseFlash();
+              log("Erase All Flash concluido com sucesso.");
+            } catch (eraseErr) {
+              // Alguns chips retornam erro mas o erase funciona
+              // Verificamos se é um erro crítico ou apenas um warning
+              log("Aviso no Erase Flash: " + eraseErr.message);
+
+              // Se o erro contiver "timeout" ou "disconnect", é crítico
+              if (eraseErr.message.toLowerCase().includes("timeout") ||
+                  eraseErr.message.toLowerCase().includes("disconnect")) {
+                throw eraseErr;
+              }
+              // Caso contrário, continuamos (o erase pode ter funcionado)
+              log("Continuando com a gravacao...");
+            }
+          }
+
+          // Pequeno delay para garantir que o chip está pronto
+          await sleep(500);
         }
 
         const fileArray = [];
         let totalSize = 0;
 
         // Load files
+        setUIState('flashing', "Carregando arquivos de firmware...");
         for (const img of images) {
+          log(`Carregando ${img.path}...`);
           const data = await fetchBinaryString(img.path);
           fileArray.push({ data, address: img.address });
           totalSize += data.length;
         }
+        log(`Total: ${fileArray.length} arquivos, ${totalSize} bytes`);
 
         setUIState('flashing', "Gravando firmware...");
 
-        // Flash
+        // Flash - usa eraseAll na writeFlash apenas se não tiver o método eraseFlash
+        // ou se eraseFlash não foi executado
+        const useEraseInWrite = shouldEraseAll && !canEraseBeforeWrite;
+
         await esploader.writeFlash({
           fileArray,
-          eraseAll: shouldEraseAll && !canEraseBeforeWrite,
+          eraseAll: useEraseInWrite,
           compress: true,
           flashSize: "4MB",
           reportProgress: (idx, written, total) => {
@@ -949,17 +1015,26 @@
           calculateMD5Hash: (image) => CryptoJS.MD5(CryptoJS.enc.Latin1.parse(image)),
         });
 
-        await esploader.after();
+        log("Gravacao concluida, finalizando...");
+
+        try {
+          await esploader.after();
+        } catch (afterErr) {
+          log("Aviso no after(): " + afterErr.message);
+          // Continuamos mesmo com erro no after()
+        }
 
         setUIState('flashing', "Reiniciando dispositivo...");
         try {
           await esploader.hardReset();
         } catch (e) {
           // Ignoramos erro aqui pois o dispositivo desconecta ao reiniciar (USB Nativo)
+          log("Reset enviado (dispositivo pode ter desconectado)");
         }
 
         setUIState('done', "Atualização concluída!");
         progressBar.style.width = "100%";
+        log("=== ATUALIZACAO CONCLUIDA COM SUCESSO ===");
 
         // Auto disconnect logic
         await disconnect(true);
@@ -971,6 +1046,8 @@
         }, 5000);
 
       } catch (err) {
+        log("ERRO FATAL: " + err.message);
+        log(err.stack || "");
         setUIState('error', "Falha na gravação");
         showToast(err.message);
         await disconnect(true);
